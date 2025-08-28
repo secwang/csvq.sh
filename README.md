@@ -1,2 +1,2 @@
 # csvq.sh
-I like csvq but implement it on awk
+This is a simple CSV operation script implemented in awk, inspired by https://github.com/mithrandie/csvq.

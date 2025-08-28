@@ -1,16 +1,14 @@
 #!/bin/sh
-
-# 定义 AWK 命令变量（可替换为 gawk/mawk 或其他路径）
-AWK="awk"  # 默认使用系统 awk，可通过环境变量覆盖
-
+# Define AWK command variable (can be replaced with gawk/mawk or other paths)
+AWK="awk"  # Default to system awk, can be overridden by environment variable
 SQL="$*"
-SQL="${SQL%;}"  # 移除末尾分号（兼容部分SQL写法）
+SQL="${SQL%;}"  # Remove trailing semicolon (compatible with some SQL syntax)
 
-# 获取表中指定列的列号（从1开始）
+# Get column number for specified column in table (starting from 1)
 get_column_number() {
     table=$1
     column=$2
-    # 使用 $AWK 处理首行
+    # Use $AWK to process the first row
     head -1 "$table.csv" | $AWK -F, -v col="$column" '{
         for (i=1; i<=NF; i++){
             if ($i == col) {
@@ -23,19 +21,18 @@ get_column_number() {
 
 case "$SQL" in
     "create table "*)
-        # 解析表名和列定义
+        # Parse table name and column definitions
         table_part=$(echo "$SQL" | sed -n 's/create table \([a-zA-Z0-9_]*\)[ ]*(\(.*\))/\1:\2/p')
         table=$(echo "$table_part" | cut -d: -f1)
         columns=$(echo "$table_part" | cut -d: -f2 | tr -d ' ')
-        # 创建CSV文件并写入列头
+        # Create CSV file and write column headers
         echo "$columns" > "$table.csv"
         echo "Created table: $table"
         ;;
-
     "insert into "*)
-        # 解析表名和插入值
+        # Parse table name and insert values
         table=$(echo "$SQL" | sed -n 's/insert into \([a-zA-Z0-9_]*\).*/\1/p')
-        # 清理值的格式（去空格/引号）
+        # Clean value format (remove spaces/quotes)
         values=$(echo "$SQL" | sed -n "s/.*values[ ]*(\([^)]*\)).*/\1/p" | $AWK -F, -v OFS=, '{
             for(i=1; i<=NF; i++) {
                 gsub(/^[[:space:]\047"]+/, "", $i);
@@ -43,46 +40,41 @@ case "$SQL" in
             }
             print
         }')
-        # 追加数据到CSV文件
+        # Append data to CSV file
         echo "$values" >> "$table.csv"
         echo "Inserted 1 row into $table"
         ;;
-
     "select * from "*)
         table=$(echo "$SQL" | sed -n 's/select \* from \([a-zA-Z0-9_]*\).*/\1/p')
         where=$(echo "$SQL" | sed -n 's/.*where \(.*\)/\1/p')
-
         if [ -n "$where" ]; then
-            # 解析WHERE条件
+            # Parse WHERE condition
             field=$(echo "$where" | cut -d= -f1 | tr -d ' ')
             value=$(echo "$where" | cut -d= -f2 | tr -d "'\"")
             col=$(get_column_number "$table" "$field")
-            # 使用 $AWK 过滤数据
+            # Use $AWK to filter data
             $AWK -F, -v col="$col" -v val="$value" '
             BEGIN {OFS=FS}
             NR==1 || $col == val {print}
             ' "$table.csv"
         else
-            # 无条件直接输出全表
+            # No condition, output entire table directly
             cat "$table.csv"
         fi
         ;;
-
     "update "*)
         table=$(echo "$SQL" | sed -n 's/update \([a-zA-Z0-9_]*\).*/\1/p')
         set_clauses=$(echo "$SQL" | sed -n 's/.*set \(.*\) where.*/\1/p')
         where=$(echo "$SQL" | sed -n 's/.*where \(.*\)/\1/p')
-
-        # 解析WHERE条件
+        # Parse WHERE condition
         where_field=$(echo "$where" | cut -d= -f1 | tr -d ' ')
         where_value=$(echo "$where" | cut -d= -f2 | tr -d "'\"")
         where_col=$(get_column_number "$table" "$where_field")
-
-        # 解析SET子句
+        # Parse SET clause
         old_IFS="$IFS"
         IFS=','
         set -- $set_clauses
-        # 动态生成AWK脚本
+        # Dynamically generate AWK script
         awk_script='
         BEGIN {OFS=FS}
         NR==1 {print; next}
@@ -95,35 +87,29 @@ case "$SQL" in
             awk_script="$awk_script \$$col=\"$val\";"
         done
         IFS="$old_IFS"
-
         awk_script='
         '$awk_script'
         }
         {print}
         '
-
-        # 使用 $AWK 处理并更新数据
+        # Use $AWK to process and update data
         $AWK -F, "$awk_script" "$table.csv" > tmp.csv && mv tmp.csv "$table.csv"
         echo "Updated $table"
         ;;
-
     "delete from "*)
         table=$(echo "$SQL" | sed -n 's/delete from \([a-zA-Z0-9_]*\).*/\1/p')
         where=$(echo "$SQL" | sed -n 's/.*where \(.*\)/\1/p')
-
-        # 解析WHERE条件
+        # Parse WHERE condition
         field=$(echo "$where" | cut -d= -f1 | tr -d ' ')
         value=$(echo "$where" | cut -d= -f2 | tr -d "'\"")
         col=$(get_column_number "$table" "$field")
-
-        # 使用 $AWK 过滤数据
+        # Use $AWK to filter data
         $AWK -F, -v col="$col" -v val="$value" '
         BEGIN {OFS=FS}
         NR==1 || $col != val {print}
         ' "$table.csv" > tmp.csv && mv tmp.csv "$table.csv"
         echo "Deleted from $table"
         ;;
-
     *)
         echo "Error: Unsupported SQL - $SQL"
         exit 1
